@@ -1,0 +1,13 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "UNO:lib"
+
+    - path: "./app/Main.hs"
+      component: "UNO:exe:UNO-exe"
+
+    - path: "./app/Paths_UNO.hs"
+      component: "UNO:exe:UNO-exe"
+
+    - path: "./test"
+      component: "UNO:test:UNO-test"
