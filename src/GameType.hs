@@ -18,57 +18,12 @@
 {-# LANGUAGE UndecidableInstances      #-}
 {-# LANGUAGE ViewPatterns              #-}
 
-module GameType
-  ( Color(..)
-  , SpellCard(..)
-  , NumberCard(..)
-  , Kind(..)
-  , Order(..)
-  , PlayerIndex
-  , Card(..)
-  , color
-  , kind
-  , CardNew(..)
-  , runCardNew
-  , CardPlayed(..)
-  , runCardPlayed
-  , CardOnHand(..)
-  , Player(..)
-  , candidates
-  , index
-  , Turn(..)
-  , playedCard
-  , playingPlayer
-  , order
-  , Pile(..)
-  , Game(..)
-  , playedTurn
-  , players
-  , pile
-  , playerIndex
-  , Score(..)
-  , GameResult(..)
-  , PlayerDependency (..)
-  , ppile
-  , pplayer
-  , pturn
-  , pdrawed
-  , GameDependency (..)
-  , game
-  , rgen
-  , TurnAnalysis (..)
-  , RandomGenWrapper (..)
-  , pattern NormalCard
-  , pattern ReverseCard
-  , pattern SkipCard
-  , pattern DrawCards
-  , pattern CardKindView
-  , pattern CardNewKindView) where
+module GameType where
 
 import           Control.Concurrent.MVar
 import           Control.Eff
 import           Control.Eff.Coroutine
-import           Control.Eff.Reader.Strict
+import           Control.Eff.Reader.Lazy
 import           Control.Monad           (liftM, when)
 import           Control.Monad.Cont      (callCC, runCont, runContT)
 import           Control.Monad.Loops     (whileM_)
@@ -89,7 +44,7 @@ data Color
   | Blue
   | Green
   | Yellow
-  deriving (Show, Eq, Enum)
+  deriving (Show, Eq, Enum, Ord)
 
 instance Random Color where
   random = randomR (Red, Yellow)
@@ -104,7 +59,7 @@ data SpellCard
   | Skip
   | Reverse
   | Universal
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data NumberCard
   = Zero
@@ -117,12 +72,12 @@ data NumberCard
   | Seven
   | Eight
   | Nine
-  deriving (Show, Eq, Enum)
+  deriving (Show, Eq, Enum, Ord)
 
 data Kind
   = Number NumberCard
   | Spell SpellCard
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data Order
   = Clockwise
@@ -140,6 +95,8 @@ makeLenses ''Card
 deriving instance (Eq (m Color)) => Eq (Card m)
 
 deriving instance (Show (m Color)) => Show (Card m)
+
+deriving instance (Ord (m Color)) => Ord (Card m)
 
 newtype CardNew =
   CardNew
@@ -174,12 +131,13 @@ data Turn = Turn { _playedCard    :: CardPlayed
 
 makeLenses ''Turn
 
-data TurnAnalysis = PlayerPlayCard PlayerIndex CardPlayed
-                  | PlayerPass PlayerIndex
-                  | PlayerDrawCards PlayerIndex Int
-                  | PlayerDrawAndPlay PlayerIndex Int CardPlayed
-                  | PlayerSkiped PlayerIndex
-                  deriving (Show)
+data TurnReport = PlayerPlayCard PlayerIndex CardPlayed
+                | PlayerPass PlayerIndex
+                | PlayerDrawCards PlayerIndex Int
+                | PlayerDrawAndPlay PlayerIndex Int CardPlayed
+                | PlayerSkiped PlayerIndex
+                | EmptyPile
+      deriving (Show, Eq)
 
 type Pile = [CardNew]
 
@@ -194,7 +152,7 @@ makeLenses ''Game
 
 type Score = Int
 
-data GameResult = GameResult { winner    :: (Score, PlayerIndex)
+data GameResult = GameResult { winner    :: (PlayerIndex, Score)
                              , finalGame :: Game
                              }
       deriving (Show)
@@ -205,16 +163,11 @@ data GameDependency = GameDependency { _game :: Game
                                      , _rgen :: RandomGenWrapper
                                      }
 
+type Mutable x = Reader (MVar x)
+type SingleMutable x r = (Member (Mutable x) r, Lifted IO r)
+type MutableList xs r = (xs <:: r, Lifted IO r)
+
 makeLenses ''GameDependency
-
-data PlayerDependency = PlayerDependency { _ppile   :: Pile
-                                         , _pturn   :: Turn
-                                         , _pplayer :: Player
-                                         , _pdrawed :: Maybe Int
-                                         }
-      deriving (Show)
-
-makeLenses ''PlayerDependency
 
 pattern CardKindView :: Kind -> CardPlayed
 pattern CardKindView k <- (view (runCardPlayed . kind) -> k)

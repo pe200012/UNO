@@ -11,7 +11,7 @@ module RandomUtil
 ) where
 
 import qualified Control.Eff            as Eff
-import qualified Control.Eff.State.Strict as Eff.State
+import qualified Control.Eff.State.Lazy as Eff.State
 import           Control.Monad.State
 import           GameType
 import           System.Random

@@ -13,16 +13,17 @@
 {-# LANGUAGE UndecidableInstances  #-}
 {-# LANGUAGE ViewPatterns          #-}
 
-module Game (runGameIO) where
+module Game (runGameIO)  where
 
 import           Control.Concurrent.MVar
 import           Control.Eff
 import           Control.Eff.Coroutine
-import           Control.Eff.Reader.Strict
-import           Control.Eff.State.Strict
-import           Control.Monad           (liftM, when)
+import           Control.Eff.Reader.Lazy
+import           Control.Eff.State.Lazy
+import           Control.Monad           (liftM, unless, when)
 import           Control.Monad.Cont      (Cont (..), ContT (..), callCC, cont,
                                           runCont, runContT)
+import           Control.Monad.Fix       (fix, mfix)
 import           Control.Monad.Loops     (whileM_)
 import qualified Control.Monad.Trans     as Trans
 import           Data.Array              (indices)
@@ -34,16 +35,16 @@ import           Data.Functor.Identity   (Identity (Identity), runIdentity)
 import           Data.List               (partition, permutations, sortBy, (\\))
 import           Data.Maybe              (fromJust, fromMaybe, isJust,
                                           isNothing)
+import           Debug.Trace             (trace)
 import           GameType
 import           Lens.Micro.Platform
 import           RandomUtil
 import           Shuffle
 import           System.Random
-import           Debug.Trace             (trace)
+import           Text.Printf             (printf)
+import           Text.Read               (readMaybe)
 
-type Mutable x = Reader (MVar x)
-type SingleMutable x r = (Member (Mutable x) r, Lifted IO r)
-type MutableList xs r = (xs <:: r, Lifted IO r)
+type MonadPlayer r = (MutableList '[Mutable Pile, Mutable Player] r, Member (Reader Turn) r)
 
 newMutable :: Lifted IO r => x -> Eff r (MVar x)
 newMutable = lift . newMVar
@@ -102,56 +103,77 @@ describeCard = ((++) . describeColor . view (color . to runIdentity) <*> (":"++)
     describeKind (Spell Skip)      = "跳过"
     describeKind (Spell Reverse)   = "反转"
 
-displayTurnAnalysis :: Lifted IO r => TurnAnalysis -> Eff r ()
-displayTurnAnalysis (PlayerPlayCard id card) = lift $ putStrLn ("玩家 " ++ show id ++ " 打出了" ++ describeCard card)
-displayTurnAnalysis (PlayerPass id) = lift $ putStrLn ("玩家 " ++ show id ++ " 选择跳过")
-displayTurnAnalysis (PlayerDrawCards id num) = lift $ putStrLn ("玩家 " ++ show id ++ " 抽了 " ++ show num ++ " 张卡")
-displayTurnAnalysis (PlayerDrawAndPlay id num card) = lift $ putStrLn ("玩家 " ++ show id ++ " 抽了 " ++ show num ++ " 张卡并打出" ++ describeCard card)
-displayTurnAnalysis (PlayerSkiped id) = lift $ putStrLn ("玩家 " ++ show id ++ " 被跳过")
+describeCardNew :: CardNew -> String
+describeCardNew = ((++) . describeColor . view color <*> (":"++) . describeKind . view kind) . view runCardNew
+  where
+    describeColor Nothing       = "无色"
+    describeColor (Just Red)    = "红"
+    describeColor (Just Blue)   = "蓝"
+    describeColor (Just Green)  = "绿"
+    describeColor (Just Yellow) = "黄"
+    describeNumber = show . fromEnum @NumberCard
+    describeKind (Number n)        = "数字牌" ++ describeNumber n
+    describeKind (Spell Universal) = "万能牌"
+    describeKind (Spell Draw2)     = "抽两张"
+    describeKind (Spell Draw4)     = "抽四张"
+    describeKind (Spell Skip)      = "跳过"
+    describeKind (Spell Reverse)   = "反转"
 
-data PlayerTurnRequest = PlayerTurnRequest { runPlayerTurnRequest :: (GameDependency, PlayerDependency)
-                                           }
-                       | SimplePassTA TurnAnalysis
-data PlayerTurnResponse = PlayerTurnResponse { runPlayerTurnResponse :: (GameDependency, PlayerDependency, TurnAnalysis)
-                                             }
-                        | Void
+displayTurnReport :: Lifted IO r => TurnReport -> Eff r ()
+displayTurnReport (PlayerPlayCard id card) = lift $ putStrLn ("玩家 " ++ show id ++ " 打出了" ++ describeCard card)
+displayTurnReport (PlayerPass id) = lift $ putStrLn ("玩家 " ++ show id ++ " 选择跳过")
+displayTurnReport (PlayerDrawCards id num) = lift $ putStrLn ("玩家 " ++ show id ++ " 抽了 " ++ show num ++ " 张卡")
+displayTurnReport (PlayerDrawAndPlay id num card) = lift $ putStrLn ("玩家 " ++ show id ++ " 抽了 " ++ show num ++ " 张卡并打出" ++ describeCard card)
+displayTurnReport (PlayerSkiped id) = lift $ putStrLn ("玩家 " ++ show id ++ " 被跳过")
+displayTurnReport EmptyPile = lift $ putStrLn "牌堆已空"
+
+displayGameResult :: Lifted IO r => GameResult -> Eff r ()
+displayGameResult r = lift $ putStrLn ("终局，胜利者为玩家 " ++ show (r ^. to winner . _1) ++ " ，得分 " ++ show (r ^. to winner . _2) ++ " 。")
+
+displayWinner :: Lifted IO r => Player -> Eff r ()
+displayWinner p = lift $ putStrLn ("玩家 " ++ show (p ^. index) ++ " 率先打出所有手牌！")
+
+displayInitialTurn :: Lifted IO r => Turn -> Eff r ()
+displayInitialTurn t = lift $ putStrLn ("开局，场牌为" ++ describeCard (t ^. playedCard))
 
 reverseOrder Counterclockwise = Clockwise
 reverseOrder Clockwise        = Counterclockwise
 
-draws :: SingleMutable PlayerDependency r => Int -> (PlayerDependency -> (TurnAnalysis -> ContT TurnAnalysis (Eff r) TurnAnalysis) -> ContT TurnAnalysis (Eff r) TurnAnalysis) -> Eff r TurnAnalysis
+draws :: (MonadPlayer r, Member (Mutable (Maybe Int)) r) => Int -> ((TurnReport -> ContT TurnReport (Eff r) TurnReport) -> ContT TurnReport (Eff r) TurnReport) -> Eff r TurnReport
 draws num k = do
-  dep <- getMutable
-  if num > length (dep ^. ppile)
+  pile <- getMutable
+  player <- getMutable
+  if num > length pile
   then do
-    setMutable (dep & pplayer . candidates %~ ((dep ^. ppile) ++)
-                    & ppile .~ []
-                    & pdrawed .~ pure num)
-    return (PlayerDrawCards (dep ^. pplayer . index) (length (dep ^. ppile)))
+    modifyMutable (over candidates (pile ++))
+    setMutable @Pile []
+    setMutable (Just (length pile))
+    return (PlayerDrawCards (player ^. index) (length pile))
   else do
-    let (topn, rest) = splitAt num (dep ^. ppile)
-    setMutable (dep & pplayer . candidates %~ (topn ++)
-                    & ppile .~ rest
-                    & pdrawed .~ pure num)
-    dep' <- getMutable
-    (`runContT` (lift . return)) $ callCC (k dep')
+    let (topn, rest) = splitAt num pile
+    modifyMutable (over candidates (pile ++))
+    setMutable rest
+    setMutable (Just num)
+    (`runContT` (lift . return)) $ callCC k
 
-play :: SingleMutable PlayerDependency r => CardOnHand -> (TurnAnalysis -> ContT TurnAnalysis (Eff r) TurnAnalysis) -> Color -> Eff r TurnAnalysis
+play :: (MonadPlayer r, Member (Mutable (Maybe Int)) r) => CardOnHand -> (TurnReport -> ContT TurnReport (Eff r) TurnReport) -> Color -> Eff r TurnReport
 play card k optionalColor = do
-  dep <- getMutable
-  when (card `notElem` dep ^. pplayer . candidates) (error (show card ++ " isn't in your candidates!"))
+  player <- getMutable
+  when (card `notElem` player ^. candidates) (error (show card ++ " isn't in your candidates!"))
   let cardPlayed = (card & _runCardNew) & color %~ (pure . fromMaybe optionalColor) & CardPlayed
-  setMutable (dep & pplayer . candidates %~ (\\ [card])
-                  & pturn . order %~ (case card of CardNewKindView (Spell Reverse) -> reverseOrder ; _ -> id)
-                  )
-  case dep ^. pdrawed of
-    Nothing -> (`runContT` (lift . return)) $ k (PlayerPlayCard (dep ^. pplayer . index) cardPlayed)
-    Just num -> (`runContT` (lift . return)) $ k (PlayerDrawAndPlay (dep ^. pplayer . index) num cardPlayed)
+  modifyMutable (over candidates (\\ [card]))
+  drew <- getMutable
+  case drew of
+    Nothing -> (`runContT` (lift . return)) $ k (PlayerPlayCard (player ^. index) cardPlayed)
+    Just num -> (`runContT` (lift . return)) $ k (PlayerDrawAndPlay (player ^. index) num cardPlayed)
 
-pass :: SingleMutable PlayerDependency r => (TurnAnalysis -> ContT TurnAnalysis (Eff r) TurnAnalysis) -> Eff r TurnAnalysis
+pass :: (MonadPlayer r, Member (Mutable (Maybe Int)) r) => (TurnReport -> ContT TurnReport (Eff r) TurnReport) -> Eff r TurnReport
 pass k = do
-  dep <- getMutable
-  (`runContT` (lift . return)) $ k (PlayerPass (dep ^. pplayer . index))
+  player <- getMutable
+  drew <- getMutable
+  case drew of
+    Nothing -> (`runContT` (lift . return)) $ k (PlayerPass (player ^. index))
+    Just num -> (`runContT` (lift . return)) $ k (PlayerDrawCards (player ^. index) num)
 
 availableCards :: Turn -> [CardOnHand] -> [CardOnHand]
 availableCards (NormalCard c k) =
@@ -191,6 +213,13 @@ randomGenWrapper f = do
   setMutable (dep & rgen .~ g')
   return a
 
+dependencyWrapper :: (SingleMutable GameDependency r0, (Reader Turn : Mutable Player : Mutable Pile : r0) ~ r1) => Eff r1 a -> Eff r0 a
+dependencyWrapper e = do
+  ga <- view game <$> getMutable
+  ((a, pl), pi) <- runMutable (ga ^. pile) . runMutable ((ga ^. players ^? ix ((ga ^. playerIndex) - 1)) & fromJust) . runReader (ga ^. playedTurn . to head) $ e
+  modifyMutable (over game (set pile pi . set (players . ix ((ga ^. playerIndex) - 1)) pl))
+  return a
+
 initialPile :: Pile
 initialPile =
   CardNew <$>
@@ -228,110 +257,166 @@ randomGame ps = do
               in distribute pile' (zipWith (:) drawn chs)
     shuffleWrapper xs = randomGenWrapper (shuffleE xs)
 
-stupidAI :: MutableList '[Mutable GameDependency, Mutable PlayerDependency] r => Eff r TurnAnalysis
+playerTurn :: SingleMutable GameDependency r => Eff r (Maybe TurnReport)
+playerTurn = do
+  ga <- view game <$> getMutable
+  let lastTurn = ga ^. playedTurn . to head
+  if null (ga ^. pile)
+  then return (Just EmptyPile)
+  else do
+    let nextToMe = lastTurn ^. playingPlayer == 0 || nextId (lastTurn ^. order) (lastTurn ^. playingPlayer) (ga ^. players & length) == ga ^. playerIndex
+    dependencyWrapper . evalMutable (Nothing :: Maybe Int) $ case ga ^. playedTurn . to head of
+      SkipCard | nextToMe -> return (Just $ PlayerSkiped (ga ^. playerIndex))
+      DrawCards _ Draw2 | nextToMe -> Just <$> draws 2 (Trans.lift . pass)
+      DrawCards _ Draw4 | nextToMe -> Just <$> draws 4 (Trans.lift . pass)
+      _ -> return Nothing
+
+stupidAI :: SingleMutable GameDependency r => Eff r TurnReport
 stupidAI = do
-  dep <- getMutable
-  let acards = availableCards (dep ^. pturn) (dep ^. pplayer . candidates)
-  if null acards
-  then draws 1 $ \dep desk ->
-    let acards' = availableCards (dep ^. pturn) (dep ^. pplayer . candidates)
-    in Trans.lift $ if null acards'
-    then pass desk
-    else randomPlay acards' desk
-  else randomPlay acards return
+  ga <- view game <$> getMutable
+  let lastTurn = ga ^. playedTurn . to head
+      player   = ga ^. players ^? ix ((ga ^. playerIndex) - 1) & fromJust
+      acards   = availableCards lastTurn (player ^. candidates)
+  dependencyWrapper . evalMutable (Nothing :: Maybe Int) $
+    if null acards
+    then  draws 1 $ \desk -> do
+      ga <- Trans.lift $ view game <$> getMutable
+      let player = ga ^. players ^? ix ((ga ^. playerIndex) - 1) & fromJust
+          acards = availableCards lastTurn (player ^. candidates)
+      Trans.lift $
+        if null acards
+        then pass desk
+        else randomPlay acards desk
+    else randomPlay acards return
   where
-    randomPlay :: ('[Reader (MVar PlayerDependency), Reader (MVar GameDependency)] <:: r, Lifted IO r) => [CardOnHand] -> (TurnAnalysis -> ContT TurnAnalysis (Eff r) TurnAnalysis) -> Eff r TurnAnalysis
     randomPlay acards@(length -> size) desk = do
       selection <- fmap (acards !!) (randomGenWrapper $ randomRE (0, size - 1))
       randomColor <- randomGenWrapper randomE
-      trace ("player chose card " ++ show selection) $
-        play selection desk randomColor
+      play selection desk randomColor
 
-
-playerTurn :: (MutableList '[Mutable PlayerDependency, Mutable GameDependency] r, Member (Yield PlayerTurnRequest PlayerTurnResponse) r) => Eff r ()
-playerTurn = do
-  dep :: PlayerDependency <- getMutable
-  gdep :: GameDependency<- getMutable
-  let playerAction = do
-        res <- yield (PlayerTurnRequest (gdep, dep))
-        let (PlayerTurnResponse (gdep', dep', ta)) = res
-        setMutable gdep'
-        setMutable dep'
-        return ta
-  if null (dep ^. ppile)
-  then do
-    ta <- pass return
-    yield @PlayerTurnRequest @PlayerTurnResponse (SimplePassTA ta)
-    return ()
-  else
-    case dep ^. pturn of
-      SkipCard ->
-       if nextId (dep ^. pturn . order) (gdep ^. game . players & length) (dep ^. pturn . playingPlayer) == (dep ^. pplayer . index)
-       then do
-        trace "player was skiped" $
-          yield @PlayerTurnRequest @PlayerTurnResponse (SimplePassTA (PlayerSkiped (dep ^. pplayer . index)))
-        return ()
-       else do
-        ta <- playerAction
-        case ta of
-          PlayerPass _ -> return ()
-          _            -> setMutable (dep & pturn . playingPlayer .~ dep ^. pplayer . index)
-      DrawCards _ Draw2 ->
-       if nextId (dep ^. pturn . order) (gdep ^. game . players & length) (dep ^. pturn . playingPlayer) == (dep ^. pplayer . index)
-       then do
-        ta <- draws 2 $ \_ desk -> desk (PlayerDrawCards (dep ^. pplayer . index) 2)
-        yield @PlayerTurnRequest @PlayerTurnResponse (SimplePassTA ta)
-        return ()
-       else do
-        ta <- playerAction
-        case ta of
-          PlayerPass _ -> return ()
-          _            -> setMutable (dep & pturn . playingPlayer .~ dep ^. pplayer . index)
-      DrawCards _ Draw4 ->
-       if nextId (dep ^. pturn . order) (gdep ^. game . players & length) (dep ^. pturn . playingPlayer) == (dep ^. pplayer . index)
-       then do
-        ta <- draws 4 $ \_ desk -> desk (PlayerDrawCards (dep ^. pplayer . index) 4)
-        yield @PlayerTurnRequest @PlayerTurnResponse (SimplePassTA ta)
-        return ()
-       else do
-        ta <- playerAction
-        case ta of
-          PlayerPass _ -> return ()
-          _            -> setMutable (dep & pturn . playingPlayer .~ dep ^. pplayer . index)
-      _ -> playerAction >> return ()
+humanPlayer :: SingleMutable GameDependency r => Eff r TurnReport
+humanPlayer = do
+  ga <- view game <$> getMutable
+  let pl = ga ^. players ^? ix ((ga ^. playerIndex) - 1) & fromJust
+      acards = availableCards (ga ^. playedTurn . to head) (pl ^. candidates)
+  lift $ putStrLn ("轮到人类玩家 " ++ show (pl ^. index))
+  lift $ putStrLn "您现在拥有手牌如下："
+  lift . for_ ([0..] `zip` (pl ^. candidates)) $ \(i, c) -> putStrLn (show i ++ ") " ++ describeCardNew c)
+  lift $ putStrLn "可以打出的手牌如下："
+  lift . for_ ([0..] `zip` acards) $ \(i, c) -> putStrLn (show i ++ ") " ++ describeCardNew c)
+  dependencyWrapper . evalMutable (Nothing :: Maybe Int) . flip fix () $ \rec _ -> do
+    lift $ printf "行动：p) 抽一张卡并跳过 d) 抽一张卡 0-%d) 打出对应卡牌 -> " (length acards - 1)
+    choice :: String <- lift getLine
+    case readMaybe choice of
+      Just n | 0 <= n && (length acards - 1) >= n ->
+        let card = acards !! n
+        in if card ^. runCardNew . color & isNothing
+        then
+          flip fix () $ \rec' _ -> do
+            lift $ putStr "选择颜色 (r/b/g/y/quit) : "
+            chosenColor :: String <- lift getLine
+            case chosenColor of
+              "r" -> play card return Red
+              "g" -> play card return Green
+              "b" -> play card return Blue
+              "y" -> play card return Yellow
+              "quit" -> rec ()
+              _   -> do
+                lift $ putStrLn "无效的颜色，请重新输入。"
+                rec' ()
+        else play card return undefined
+             | otherwise -> do
+                lift $ putStrLn "超出有效范围，请重新输入。"
+                rec ()
+      Nothing ->
+        case choice of
+          "p" -> draws 1 (Trans.lift . pass)
+          "d" -> runReader (ga ^. pile . to head) $ draws 1 (Trans.lift . afterAction)
+          _   -> do
+            lift $ putStrLn "无效的选项，请重新输入。"
+            rec ()
+  where afterAction desk = do
+          newCard <- ask
+          ga <- view game <$> getMutable
+          let pl = ga ^. players ^? ix ((ga ^. playerIndex) - 1) & fromJust
+              acards = availableCards (ga ^. playedTurn . to head) (pl ^. candidates)
+          lift $ putStrLn ("抽到" ++ describeCardNew newCard)
+          lift $ putStrLn "可以打出的手牌如下："
+          lift . for_ ([0..] `zip` acards) $ \(i, c) -> putStrLn (show i ++ ") " ++ describeCardNew c)
+          flip fix () $ \rec _ -> do
+            lift $! printf "行动：p) 跳过 0-%d) 打出对应卡牌 -> " (length acards - 1)
+            choice :: String <- lift getLine
+            case readMaybe choice of
+              Just n | 0 <= n && (length acards - 1) >= n ->
+                let card = acards !! n
+                in if card ^. runCardNew . color & isNothing
+                then
+                  flip fix () $ \rec' _ -> do
+                    lift $ putStr "选择颜色 (r/b/g/y/quit) : "
+                    chosenColor :: String <- lift getLine
+                    case chosenColor of
+                      "r" -> play card desk Red
+                      "g" -> play card desk Green
+                      "b" -> play card desk Blue
+                      "y" -> play card desk Yellow
+                      "quit" -> rec ()
+                      _   -> do
+                        lift $ putStrLn "无效的颜色，请重新输入。"
+                        rec' ()
+                else play card return undefined
+                     | otherwise -> do
+                        lift $ putStrLn "超出有效范围，请重新输入。"
+                        rec ()
+              Nothing ->
+                case choice of
+                  "p" -> pass desk
+                  _   -> do
+                    lift $ putStrLn "无效的选项，请重新输入。"
+                    rec ()
 
 runGame :: SingleMutable GameDependency r => Eff r GameResult
 runGame = do
-  go
-  gdep :: GameDependency <- getMutable
-  let (winner : rest) = sortBy (\a b -> compare (length (a^.candidates)) (length (b ^. candidates)) ) (gdep ^. game . players)
-  return $ GameResult (winner^.index, sum $ calculateScore <$> rest) (gdep ^. game)
+  ga <- view game <$> getMutable
+  displayInitialTurn (ga ^. playedTurn . to head)
+  gameLoop
+  ga <- view game <$> getMutable
+  let (winner : rest) = sortBy (\a b -> compare (length (a^.candidates)) (length (b ^. candidates))) (ga ^. players)
+      gr =  GameResult (winner ^. index, sum $ calculateScore <$> rest) ga
+  displayGameResult gr
+  return gr
   where
-    deal (Y c (PlayerTurnRequest (gdep, dep))) _ = do
-      ((ta, dep'), gdep') <- runMutable gdep . runMutable dep $ stupidAI
-      trace (show ta) $
-        c (PlayerTurnResponse (gdep', dep', ta)) >>= (`deal` ta)
-    deal (Y c (SimplePassTA ta)) _ = c Void >>= (`deal` ta)
-    deal Done result = return result
-    go = do
-      gdep <- getMutable
-      let game' = gdep ^. game
-          dep = PlayerDependency (game' ^. pile) (game' ^. playedTurn ^? ix 0 & fromJust) ((game' ^. players ^? ix ((game' ^. playerIndex) - 1)) & fromJust) Nothing
-      (ta, dep') <- runMutable dep . ((>>= flip deal undefined) . runC) $ playerTurn
-      displayTurnAnalysis ta
-      case dep' ^. ppile of
-        [] -> return ()
-        _ -> do
-          modifyMutable (over game (set pile (dep' ^. ppile)
-                      . set playerIndex (nextId (dep' ^. pturn . order) (game' ^. players & length) (game' ^. playerIndex))
-                      . set (players . ix ((dep' ^. pplayer . index) - 1)) (dep' ^. pplayer)
-                      . set (playedTurn . ix ((dep' ^. pplayer . index) - 1)) (dep' ^. pturn)))
-          go
+    gameLoop = do
+      gdep :: GameDependency <- getMutable
+      let action = stupidAI
+      tr <- do
+        report <- playerTurn
+        maybe action return report
+      currentPlayer <- (\d -> d ^. game . players . to (!! ((d ^. game . playerIndex) - 1))) <$> getMutable
+      displayTurnReport tr
+      when (null (currentPlayer ^. candidates)) (displayWinner currentPlayer)
+      unless (tr == EmptyPile || null (currentPlayer ^. candidates)) $ do
+        let lastTurn = gdep ^. game . playedTurn . to head
+            keepLastTurn id = Turn (lastTurn ^. playedCard) id (lastTurn ^. order)
+            currentOrder card =
+              if card ^. runCardPlayed . kind == Spell Reverse
+              then reverseOrder (lastTurn ^. order)
+              else lastTurn ^. order
+            currentTurn =
+              case tr of
+                PlayerPlayCard id card -> Turn card id (currentOrder card)
+                PlayerPass id -> keepLastTurn id
+                PlayerDrawCards id _ -> keepLastTurn id
+                PlayerDrawAndPlay id _ card -> Turn card id (currentOrder card)
+                PlayerSkiped id -> keepLastTurn id
+            nextPlayerId = nextId (currentTurn ^. order) (gdep ^. game . players & length) (currentPlayer ^. index)
+        modifyMutable (over game (over playedTurn (currentTurn :) . set playerIndex nextPlayerId))
+        gameLoop
 
 runGameIO :: IO ()
 runGameIO = do
   gen <- RandomGenWrapper <$> getStdGen
-  runLift . runMutable gen $ do
-    ga <- randomGame 2
-    evalMutable (GameDependency ga gen) runGame
+  runLift $ do
+    (ga, gen') <- runMutable gen (randomGame 4)
+    let gdep = GameDependency ga gen'
+    runMutable gdep runGame
   return ()

@@ -13,19 +13,19 @@ module Shuffle
   )
 where
 
+import qualified Control.Eff            as Eff
+import qualified Control.Eff.State.Lazy as Eff.State
 import           Control.Monad.ST
 import           Control.Monad.State
-import qualified Control.Eff as Eff
-import qualified Control.Eff.State.Strict as Eff.State
 import           Data.Array             (Array)
 import           Data.Array.Base        (MArray (unsafeWrite))
 import           Data.Array.MArray
 import           Data.Array.ST
 import           Data.Foldable          (for_)
 import           Data.List              (mapAccumL)
-import           Data.STRef.Strict             (newSTRef, readSTRef, writeSTRef)
-import           System.Random          (RandomGen, StdGen, randomR)
+import           Data.STRef             (newSTRef, readSTRef, writeSTRef)
 import           GameType
+import           System.Random          (RandomGen, StdGen, randomR)
 
 shuffle :: RandomGen g => g -> [a] -> ([a], g)
 shuffle g xs = runST $ do
