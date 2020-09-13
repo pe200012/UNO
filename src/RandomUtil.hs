@@ -1,20 +1,17 @@
-{-# LANGUAGE DataKinds        #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MonoLocalBinds   #-}
-{-# LANGUAGE TypeOperators    #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE TypeOperators             #-}
 
-module RandomUtil
-( randomM
-, randomRM
-, randomE
-, randomRE
-) where
+module RandomUtil where
 
 import qualified Control.Eff            as Eff
 import qualified Control.Eff.State.Lazy as Eff.State
 import           Control.Monad.State
-import           GameType
 import           System.Random
+
+data RandomGenWrapper = forall g. RandomGen g => RandomGenWrapper g
 
 randomM :: (MonadState g m, Random a, RandomGen g) => m a
 randomM = do

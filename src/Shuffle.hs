@@ -24,7 +24,7 @@ import           Data.Array.ST
 import           Data.Foldable          (for_)
 import           Data.List              (mapAccumL)
 import           Data.STRef             (newSTRef, readSTRef, writeSTRef)
-import           GameType
+import           RandomUtil
 import           System.Random          (RandomGen, StdGen, randomR)
 
 shuffle :: RandomGen g => g -> [a] -> ([a], g)

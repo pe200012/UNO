@@ -36,6 +36,7 @@ import           Data.Functor.Identity   (Identity (Identity), runIdentity)
 import           Data.List               (partition, permutations, sortBy, (\\))
 import           Data.Maybe              (fromJust, fromMaybe, isNothing)
 import           Lens.Micro.Platform
+import           RandomUtil
 import           System.Random           (Random (..), RandomGen, StdGen,
                                           randomR)
 
@@ -59,7 +60,14 @@ data SpellCard
   | Skip
   | Reverse
   | Universal
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Enum)
+
+instance Random SpellCard where
+  random = randomR (Draw2, Universal)
+  randomR (lo, hi) g = (spells !! index, g')
+    where
+      (index, g') = randomR (0, length spells - 1) g
+      spells = [lo..hi]
 
 data NumberCard
   = Zero
@@ -73,6 +81,13 @@ data NumberCard
   | Eight
   | Nine
   deriving (Show, Eq, Enum, Ord)
+
+instance Random NumberCard where
+  random = randomR (Zero, Nine)
+  randomR (lo, hi) g = (numbers !! index, g')
+    where
+      (index, g') = randomR (0, length numbers - 1) g
+      numbers = [lo..hi]
 
 data Kind
   = Number NumberCard
@@ -157,15 +172,9 @@ data GameResult = GameResult { winner    :: (PlayerIndex, Score)
                              }
       deriving (Show)
 
-data RandomGenWrapper = forall g. RandomGen g => RandomGenWrapper g
-
 data GameDependency = GameDependency { _game :: Game
                                      , _rgen :: RandomGenWrapper
                                      }
-
-type Mutable x = Reader (MVar x)
-type SingleMutable x r = (Member (Mutable x) r, Lifted IO r)
-type MutableList xs r = (xs <:: r, Lifted IO r)
 
 makeLenses ''GameDependency
 

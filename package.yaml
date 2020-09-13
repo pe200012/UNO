@@ -27,6 +27,7 @@ dependencies:
 - monad-loops
 - mtl
 - extensible-effects
+- QuickCheck >= 2.14.1
 
 library:
   source-dirs: src

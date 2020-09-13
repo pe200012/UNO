@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-16.8
+resolver: lts-16.13
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -34,7 +34,12 @@ packages:
 # These entries can reference officially published versions as well as
 # forks / in-progress versions pinned to a git hash. For example:
 #
-#extra-deps:
+extra-deps:
+  - QuickCheck-2.14.1@sha256:01e46d7b0a8d3148288ec977625f62d5516ebb5031a50c63f0453863301b4a79,7736
+  - random-1.2.0@sha256:4321209c8faedc034810ea8ed0dbc4a36f1a1df97b75af024219f2f533da57de,6094
+  - splitmix-0.1.0.1@sha256:22f9662e7e8b173421872241edd39350078a9ed4bb9e9f503948c5b483c79276,5253
+  - hie-bios-0.6.3@sha256:ac6f2864c7235702f8e498ad70e32c33e1f8a3564508cdeb55605784a687dd36,12562
+  - lsp-test-0.11.0.5@sha256:9fc373d36ce29348d679677e230096a3ed24d024869ec29e184c07cbce622842,4358
 #  - freer-0.2.4.1@sha256:f8650d4787f0909b7887188f0f1ff84ead5f5932d4c3a2d3e49120b7d95b3c5d,3221
 # - acme-missiles-0.3
 # - git: https://github.com/commercialhaskell/stack.git
