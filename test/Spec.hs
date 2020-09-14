@@ -23,6 +23,7 @@ import           Test.QuickCheck         (Arbitrary (..), Property,
                                           property, quickCheck, suchThat,
                                           vectorOf)
 import           Test.QuickCheck.Monadic (monadicIO)
+import Data.Coerce (coerce)
 
 instance Arbitrary Kind where
     arbitrary = do
@@ -62,6 +63,11 @@ newtype IncapablePlayer = IncapablePlayer Player deriving Show
 instance Arbitrary IncapablePlayer where
     arbitrary = IncapablePlayer <$> Player [] <$> arbitrarySizedNatural
 
+newtype AnyPlayer = AnyPlayer Player deriving Show
+
+instance Arbitrary AnyPlayer where
+    arbitrary = AnyPlayer <$> (Player <$> listOf (CardNew <$> arbitrary) <*> suchThat arbitrarySizedNatural (> 1))
+
 prop_drawsCorrectlyDrawNCardsIntoPlayerCandidates :: SufficientPile -> Player -> Property
 prop_drawsCorrectlyDrawNCardsIntoPlayerCandidates (SufficientPile pile) player = monadicIO $ do
     num <- randomRIO (1, length pile)
@@ -100,6 +106,14 @@ prop_playShouldThrowErrorOnNonexistingCard (IncapablePlayer player) randomCard =
     let (((Left (PlayNonexistingCard (CardPlayed c)), _), Nothing), player') = run . runState player . runFirstWriter @CardPlayed . runState (DrawFlag False 0) . runError @GameException $ play (CardPlayed randomCard)
     return . label "playShouldThrowErrorOnNonexistingCard" $ c == randomCard && player' == player
 
+prop_drawsAndPlayOutputPlayerDrawAndPlay :: SufficientPile -> AnyPlayer -> Property
+prop_drawsAndPlayOutputPlayerDrawAndPlay (SufficientPile pile) (AnyPlayer player) = monadicIO $ do
+    color' <- randomIO
+    let (((Right (PlayerDrawAndPlay _ n c), _), Just c'), player') = run . runState player . runFirstWriter @CardPlayed . runState (DrawFlag False 0) . runError @GameException . evalState pile $ do
+                                                                    draws 1 $ \[card] ->
+                                                                        play (randomChooseColor (coerce card) color')
+    return . label "drawsAndPlayOutputPlayerDrawAndPlay" $ n == 1 && c == c'
+
 randomChooseColor :: Card Maybe -> Color -> CardPlayed
 randomChooseColor c@(view color -> Nothing) color' = c & color .~ (return color') & CardPlayed
 randomChooseColor c _ = c & color %~ (return . fromJust) & CardPlayed
@@ -112,5 +126,6 @@ main = do
     quickCheck prop_drawsCalledMultipleTimesAccumulate
     quickCheck prop_playCorrectlyPlayCard
     quickCheck prop_playShouldThrowErrorOnNonexistingCard
+    quickCheck prop_drawsAndPlayOutputPlayerDrawAndPlay
 
 
