@@ -115,3 +115,12 @@ play card = do
         restore c@(CardKindView (Spell Universal)) = c & _runCardPlayed & color .~ Nothing & CardNew
         restore c = c & _runCardPlayed & color %~ (return . runIdentity) & CardNew
         originalCard = restore card
+
+-- | @pass@ Skip current turn
+pass :: ('[State Player, State DrawFlag] <:: r) => Eff r TurnReport
+pass = do
+  (DrawFlag drown n) <- get
+  id <- view index <$> get
+  if drown
+  then return $ PlayerDrawCards id n
+  else return $ PlayerPass id
