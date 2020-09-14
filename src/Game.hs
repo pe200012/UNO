@@ -14,6 +14,8 @@ import           GameType
 import           Lens.Micro.Platform
 import           RandomUtil
 import           Shuffle
+import Control.Eff.Exception (throwError_, Exc)
+import Control.Monad (when)
 
 nextId :: (Ord a, Num a) => Order -> a -> a -> a
 nextId Clockwise max id
@@ -74,7 +76,9 @@ displayInitialTurn t = lift $ putStrLn ("开局，场牌为" ++ describeCard (t 
 reverseOrder Counterclockwise = Clockwise
 reverseOrder Clockwise        = Counterclockwise
 
-data DrawFlag = DrawFlag Bool Int
+data DrawFlag = DrawFlag Bool Int deriving Show
+data GameException = PlayNonexistingCard CardPlayed
+  deriving Show
 
 -- | draws n k draw n cards into player's candidates, and then pass these cards to continuation. Will early-exit if there aren't enough cards in pile
 draws :: ('[State Pile, State Player, State DrawFlag] <:: r) => Int -> ([CardOnHand] -> Eff r TurnReport) -> Eff r TurnReport
@@ -94,3 +98,19 @@ draws num k = do
       put @Pile rest
       put @DrawFlag (DrawFlag True (num + n))
       k topn
+
+play :: ('[State Player, Writer CardPlayed, State DrawFlag, Exc GameException] <:: r) => CardPlayed -> Eff r TurnReport
+play card = do
+  (DrawFlag drown n) <- get
+  cardsonhand <- view candidates <$> get
+  id <- view index <$> get
+  when (not (originalCard `elem` cardsonhand)) (throwError_ (PlayNonexistingCard card))
+  modify (over candidates (\\ [originalCard]))
+  tell card
+  if drown
+  then return (PlayerDrawAndPlay id n card)
+  else return (PlayerPlayCard id card)
+  where restore c@(CardKindView (Spell Draw4)) = c & _runCardPlayed & color .~ Nothing & CardNew
+        restore c@(CardKindView (Spell Universal)) = c & _runCardPlayed & color .~ Nothing & CardNew
+        restore c = c & _runCardPlayed & color %~ (return . runIdentity) & CardNew
+        originalCard = restore card

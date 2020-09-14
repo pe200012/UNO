@@ -117,7 +117,7 @@ newtype CardNew =
   CardNew
     { _runCardNew :: Card Maybe
     }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 makeLenses ''CardNew
 
@@ -125,7 +125,7 @@ newtype CardPlayed =
   CardPlayed
     { _runCardPlayed :: Card Identity
     }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 makeLenses ''CardPlayed
 
@@ -134,7 +134,7 @@ type CardOnHand = CardNew
 data Player = Player { _candidates :: [CardOnHand]
                      , _index      :: PlayerIndex
                      }
-      deriving (Show)
+      deriving (Show, Eq)
 
 makeLenses ''Player
 

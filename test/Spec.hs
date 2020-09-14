@@ -2,18 +2,26 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE ViewPatterns               #-}
 module Main where
 
-import           Control.Eff             (run)
+import           Control.Eff
+import           Control.Eff.Exception   (runError, runFail)
 import           Control.Eff.State.Lazy
+import           Control.Eff.Writer.Lazy (runFirstWriter)
 import           Control.Monad.Identity  (Identity (..))
-import           Game                    (DrawFlag (..), draws)
+import           Data.List               (sort)
+import           Data.Maybe              (fromJust)
+import           Debug.Trace             (trace)
+import           Game
 import           GameType
 import           Lens.Micro.Platform
 import           System.Random           (randomIO, randomRIO)
-import           Test.QuickCheck         (Arbitrary (..), Property, chooseAny,
-                                          chooseInt, elements, listOf,
-                                          quickCheck, suchThat, vectorOf)
+import           Test.QuickCheck         (Arbitrary (..), Property,
+                                          arbitrarySizedNatural, chooseAny,
+                                          chooseInt, elements, label, listOf,
+                                          property, quickCheck, suchThat,
+                                          vectorOf)
 import           Test.QuickCheck.Monadic (monadicIO)
 
 instance Arbitrary Kind where
@@ -27,8 +35,9 @@ instance Arbitrary (Card Identity) where
 
 instance Arbitrary (Card Maybe) where
     arbitrary = do
-        color <- chooseAny
-        Card <$> elements [Just color, Nothing] <*> arbitrary
+        normalCard <- Card <$> (Just <$> chooseAny) <*> (suchThat arbitrary ((&&) . (/= Spell Universal) <*> (/= Spell Draw4)))
+        specialCard <- Card Nothing <$> (suchThat arbitrary ((||) . (== Spell Universal) <*> (== Spell Draw4)))
+        elements [normalCard, specialCard]
 
 instance Arbitrary Player where
     arbitrary = Player <$> (fmap CardNew <$> suchThat arbitrary ((< 30) . length)) <*> arbitrary
@@ -43,30 +52,57 @@ newtype AnyPileTest = AnyPileTest Pile deriving Show
 instance Arbitrary AnyPileTest where
     arbitrary = AnyPileTest <$> suchThat (listOf (CardNew <$> arbitrary)) ((<= 108) . length)
 
+newtype CapablePlayer = CapablePlayer Player deriving Show
+
+instance Arbitrary CapablePlayer where
+    arbitrary = CapablePlayer <$> (Player <$> suchThat (listOf (CardNew <$> arbitrary)) ((> 0) . length) <*> suchThat arbitrarySizedNatural (> 1))
+
+newtype IncapablePlayer = IncapablePlayer Player deriving Show
+
+instance Arbitrary IncapablePlayer where
+    arbitrary = IncapablePlayer <$> Player [] <$> arbitrarySizedNatural
+
 prop_drawsCorrectlyDrawNCardsIntoPlayerCandidates :: SufficientPile -> Player -> Property
 prop_drawsCorrectlyDrawNCardsIntoPlayerCandidates (SufficientPile pile) player = monadicIO $ do
     num <- randomRIO (1, length pile)
     let (topn, rest) = splitAt num pile
     let (player', pile') = run . runState pile . execState player . evalState (DrawFlag False 0) $ draws num (const $ return (PlayerDrawCards (player ^. index) num))
-    return $ (player' ^. candidates & take num) == topn && rest == pile'
+    return . label "drawsCorrectlyDrawNCardsIntoPlayerCandidates" $ (player' ^. candidates & take num) == topn && rest == pile'
 
 prop_drawsTurnOnDrawFlag :: AnyPileTest -> Player -> Property
 prop_drawsTurnOnDrawFlag (AnyPileTest pile) player = monadicIO $ do
     num <- randomIO
     let (DrawFlag b _) = run . evalState pile . evalState player . execState (DrawFlag False 0) $ draws num (const $ return (PlayerDrawCards (player ^. index) num))
-    return b
+    return $ label "drawsTurnOnDrawFlag" b
 
 prop_drawsCorrectlyHandleNonsufficientPile :: AnyPileTest -> Player -> Property
-prop_drawsCorrectlyHandleNonsufficientPile (AnyPileTest pile) player = monadicIO $ do
-    num <- randomIO
-    let (player', pile') = run . runState pile . execState player . runState (DrawFlag False 0) $ draws num (const $ return (PlayerDrawCards (player ^. index) num))
-    return $ (length pile - length pile') == (player' ^. candidates & length) - (player ^. candidates & length)
+prop_drawsCorrectlyHandleNonsufficientPile (AnyPileTest pile) player =
+    let num = length pile + 1
+        ((report, player'), pile') = run . runState pile . runState player . evalState (DrawFlag False 0) $ draws num (const $ return (PlayerPass (player ^. index)))
+    in label "drawsCorrectlyHandleNonsufficientPile" $ (length pile - length pile') == (player' ^. candidates & length) - (player ^. candidates & length) && report == PlayerDrawCards (player ^. index) (length pile - length pile')
 
 prop_drawsCalledMultipleTimesAccumulate :: SufficientPile -> Player -> Property
-prop_drawsCalledMultipleTimesAccumulate (SufficientPile pile) player = monadicIO $ do
+prop_drawsCalledMultipleTimesAccumulate (SufficientPile pile) player =
     let (DrawFlag _ n) = run . evalState pile . evalState player . execState (DrawFlag False 0) $ draws half (const $ return (PlayerDrawCards (player ^. index) half)) >> draws half (const $ return (PlayerDrawCards (player ^. index) (half * 2)))
-    return $ n == half * 2
+    in label "drawsCalledMultipleTimesAccumulate" $ n == half * 2
     where half = (length pile) `div` 2
+
+prop_playCorrectlyPlayCard :: CapablePlayer -> Property
+prop_playCorrectlyPlayCard (CapablePlayer player) = monadicIO $ do
+    card <- ((player ^. candidates) !!) <$> randomRIO (0, (player ^. candidates & length) - 1)
+    color' <- randomIO
+    let cardPlayed = randomChooseColor (card ^. runCardNew) color'
+        (((Right (PlayerPlayCard _ c), _), Just c'), player') = run . runState player . runFirstWriter @CardPlayed . runState (DrawFlag False 0) . runError @GameException $ play cardPlayed
+    return . label "playCorrectlyPlayCard" $ c == c' && (player' ^. candidates & (card :) & sort) == (player ^. candidates & sort)
+
+prop_playShouldThrowErrorOnNonexistingCard :: IncapablePlayer -> Card Identity -> Property
+prop_playShouldThrowErrorOnNonexistingCard (IncapablePlayer player) randomCard = monadicIO $ do
+    let (((Left (PlayNonexistingCard (CardPlayed c)), _), Nothing), player') = run . runState player . runFirstWriter @CardPlayed . runState (DrawFlag False 0) . runError @GameException $ play (CardPlayed randomCard)
+    return . label "playShouldThrowErrorOnNonexistingCard" $ c == randomCard && player' == player
+
+randomChooseColor :: Card Maybe -> Color -> CardPlayed
+randomChooseColor c@(view color -> Nothing) color' = c & color .~ (return color') & CardPlayed
+randomChooseColor c _ = c & color %~ (return . fromJust) & CardPlayed
 
 main :: IO ()
 main = do
@@ -74,6 +110,7 @@ main = do
     quickCheck prop_drawsTurnOnDrawFlag
     quickCheck prop_drawsCorrectlyHandleNonsufficientPile
     quickCheck prop_drawsCalledMultipleTimesAccumulate
-
+    quickCheck prop_playCorrectlyPlayCard
+    quickCheck prop_playShouldThrowErrorOnNonexistingCard
 
 
