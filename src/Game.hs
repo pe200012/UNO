@@ -80,7 +80,7 @@ data DrawFlag = DrawFlag Bool Int deriving Show
 data GameException = PlayNonexistingCard CardPlayed
   deriving Show
 
--- | draws n k draw n cards into player's candidates, and then pass these cards to continuation. Will early-exit if there aren't enough cards in pile
+-- | draws n k Draw n cards into player's candidates, and then pass these cards to continuation. Will early-exit if there aren't enough cards in pile
 draws :: ('[State Pile, State Player, State DrawFlag] <:: r) => Int -> ([CardOnHand] -> Eff r TurnReport) -> Eff r TurnReport
 draws num k = do
   pile <- get @Pile
