@@ -99,6 +99,7 @@ draws num k = do
       put @DrawFlag (DrawFlag True (num + n))
       k topn
 
+-- | play c Output CardPlayed c and then return TurnReport according to DrawFlag. Will throw exception PlayNonexsitingCard on non-existing card
 play :: ('[State Player, Writer CardPlayed, State DrawFlag, Exc GameException] <:: r) => CardPlayed -> Eff r TurnReport
 play card = do
   (DrawFlag drown n) <- get
