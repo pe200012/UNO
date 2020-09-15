@@ -13,6 +13,7 @@ import           Control.Eff.Writer.Lazy (Writer, tell)
 import           Control.Monad           (when)
 import           Data.Functor.Identity
 import           Data.List               (partition, (\\))
+import           Data.Maybe              (fromMaybe)
 import           GameType
 import           Lens.Micro.Platform
 import           RandomUtil
@@ -168,3 +169,20 @@ pass = do
   if drown
   then return $ PlayerDrawCards id n
   else return $ PlayerPass id
+
+randomGame :: Member (State RandomGenWrapper) r => Int -> Eff r Game
+randomGame ps = do
+  randomPile <- shuffleE initialPile
+  let (randomPlayers, (top:remainingPile)) =
+        let (p, c) = distribute randomPile initialCardsOnHand
+         in (zipWith Player c [1 .. ps], p)
+      len = length randomPlayers
+  rc <- randomE
+  return $ Game remainingPile [Turn (top & _runCardNew & color %~ (return . fromMaybe rc) & CardPlayed) 0 Clockwise] randomPlayers 1
+  where
+    initialCardsOnHand = replicate ps []
+    distribute pile chs =
+      if length (head chs) == 7
+        then (pile, chs)
+        else let (drawn, pile') = splitAt ps pile
+              in distribute pile' (zipWith (:) drawn chs)
