@@ -10,6 +10,7 @@ import           Control.Eff.Exception   (runError, runFail)
 import           Control.Eff.State.Lazy
 import           Control.Eff.Writer.Lazy (runFirstWriter)
 import           Control.Monad.Identity  (Identity (..))
+import           Data.Coerce             (coerce)
 import           Data.List               (sort)
 import           Data.Maybe              (fromJust)
 import           Debug.Trace             (trace)
@@ -23,7 +24,6 @@ import           Test.QuickCheck         (Arbitrary (..), Property,
                                           property, quickCheck, suchThat,
                                           vectorOf)
 import           Test.QuickCheck.Monadic (monadicIO)
-import Data.Coerce (coerce)
 
 instance Arbitrary Kind where
     arbitrary = do
@@ -114,6 +114,22 @@ prop_drawsAndPlayOutputPlayerDrawAndPlay (SufficientPile pile) (AnyPlayer player
                                                                         play (randomChooseColor (coerce card) color')
     return . label "drawsAndPlayOutputPlayerDrawAndPlay" $ n == 1 && c == c'
 
+prop_initialPileMeetsRequirements :: Property
+prop_initialPileMeetsRequirements =
+    label "initialPileMeetsRequirements" $ length initialPile == 108
+        && length (filter isNumber initialPile) == 76
+        && length (filter isSpell initialPile) == 24
+        && length (filter isUniversal initialPile) == 8
+    where isNumber (CardNewKindView (Number _)) = True
+          isNumber _                            = False
+          isSpell (CardNewKindView (Spell Draw2))   = True
+          isSpell (CardNewKindView (Spell Skip))    = True
+          isSpell (CardNewKindView (Spell Reverse)) = True
+          isSpell _                                 = False
+          isUniversal (CardNewKindView (Spell Draw4))     = True
+          isUniversal (CardNewKindView (Spell Universal)) = True
+          isUniversal _                                   = False
+
 randomChooseColor :: Card Maybe -> Color -> CardPlayed
 randomChooseColor c@(view color -> Nothing) color' = c & color .~ (return color') & CardPlayed
 randomChooseColor c _ = c & color %~ (return . fromJust) & CardPlayed
@@ -127,5 +143,4 @@ main = do
     quickCheck prop_playCorrectlyPlayCard
     quickCheck prop_playShouldThrowErrorOnNonexistingCard
     quickCheck prop_drawsAndPlayOutputPlayerDrawAndPlay
-
-
+    quickCheck prop_initialPileMeetsRequirements

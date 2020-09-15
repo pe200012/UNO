@@ -97,6 +97,29 @@ calculateScore (view candidates -> cards) =
                                               _               -> False) rest
         unwrapNumber (Number n) = n
 
+-- | @initialPile@ Contains 108 cards in total
+-- prop> has 76 number cards
+-- prop> has 24 spell cards
+-- prop> has 8 universal/functional cards
+initialPile :: Pile
+initialPile =
+  CardNew <$>
+  concatMap (replicate 4) [Card Nothing (Spell s) | s <- [Draw4, Universal]] ++
+  concatMap
+    (replicate 2)
+    [Card (Just c) (Spell s) | s <- [Draw2, Skip, Reverse], c <- fullColor] ++
+  concatMap
+    (if' . isZero . _kind <*> return <*> replicate 2)
+    [Card (Just c) (Number n) | c <- fullColor, n <- [Zero .. Nine]]
+  where
+    fullColor = [Red .. Yellow]
+    if' b a c =
+      if b
+        then a
+        else c
+    isZero (Number Zero) = True
+    isZero _             = False
+
 data DrawFlag = DrawFlag Bool Int deriving Show
 data GameException = PlayNonexistingCard CardPlayed
   deriving Show
