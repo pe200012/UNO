@@ -3,19 +3,20 @@
 {-# LANGUAGE GADTs            #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators    #-}
+{-# LANGUAGE ViewPatterns     #-}
 module Game where
 
 import           Control.Eff
+import           Control.Eff.Exception   (Exc, throwError_)
 import           Control.Eff.State.Lazy
 import           Control.Eff.Writer.Lazy (Writer, tell)
+import           Control.Monad           (when)
 import           Data.Functor.Identity
-import           Data.List               ((\\))
+import           Data.List               (partition, (\\))
 import           GameType
 import           Lens.Micro.Platform
 import           RandomUtil
 import           Shuffle
-import Control.Eff.Exception (throwError_, Exc)
-import Control.Monad (when)
 
 nextId :: (Ord a, Num a) => Order -> a -> a -> a
 nextId Clockwise max id
@@ -75,6 +76,26 @@ displayInitialTurn t = lift $ putStrLn ("开局，场牌为" ++ describeCard (t 
 
 reverseOrder Counterclockwise = Clockwise
 reverseOrder Clockwise        = Counterclockwise
+
+-- | @calculateScore p@ Calculate the score of the player from his candidates
+calculateScore :: Player -> Score
+calculateScore (view candidates -> cards) =
+  -- [@Number Card@]: 0-9
+  sum (fromEnum . unwrapNumber . view (runCardNew . kind) <$> numberCards) +
+  -- [@Spell Card@]: Draw2 Skip Reverse
+  length spellCards * 20 +
+  -- [@Universal Card@]: Cards with no color(Draw4, Universal)
+  length universalCards * 50
+  where (numberCards, rest) = partition (\(view (runCardNew . kind) -> k) ->
+                                            case k of
+                                              Number _ -> True
+                                              _        -> False) cards
+        (universalCards, spellCards) = partition (\(view (runCardNew . kind) -> k) ->
+                                            case k of
+                                              Spell Universal -> True
+                                              Spell Draw4     -> True
+                                              _               -> False) rest
+        unwrapNumber (Number n) = n
 
 data DrawFlag = DrawFlag Bool Int deriving Show
 data GameException = PlayNonexistingCard CardPlayed
