@@ -7,22 +7,20 @@
 module Main where
 
 import           Control.Eff
-import           Control.Eff.Exception   (runError, runFail)
+import           Control.Eff.Exception   (runError)
 import           Control.Eff.State.Lazy
 import           Control.Eff.Writer.Lazy (runFirstWriter)
 import           Control.Monad.Identity  (Identity (..))
 import           Data.Coerce             (coerce)
 import           Data.List               (sort)
 import           Data.Maybe              (fromJust)
-import           Debug.Trace             (trace)
 import           Game
 import           GameType
 import           Lens.Micro.Platform
 import           System.Random           (randomIO, randomRIO)
 import           Test.QuickCheck         (Arbitrary (..), Property,
                                           arbitrarySizedNatural, chooseAny,
-                                          chooseInt, elements, label, listOf,
-                                          property, quickCheck, suchThat,
+                                          chooseInt, elements, label, listOf, quickCheck, suchThat,
                                           vectorOf)
 import           Test.QuickCheck.Monadic (monadicIO)
 
