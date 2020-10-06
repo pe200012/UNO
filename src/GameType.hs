@@ -20,25 +20,10 @@
 
 module GameType where
 
-import           Control.Concurrent.MVar
-import           Control.Eff
-import           Control.Eff.Coroutine
-import           Control.Eff.Reader.Lazy
-import           Control.Monad           (liftM, when)
-import           Control.Monad.Cont      (callCC, runCont, runContT)
-import           Control.Monad.Loops     (whileM_)
-import           Data.Array              (indices)
-import           Data.Array.Base         (MArray (unsafeWrite))
-import           Data.Array.MArray       (getElems, newArray_, readArray,
-                                          writeArray)
-import           Data.Foldable           (for_)
-import           Data.Functor.Identity   (Identity (Identity), runIdentity)
-import           Data.List               (partition, permutations, sortBy, (\\))
-import           Data.Maybe              (fromJust, fromMaybe, isNothing)
-import           Lens.Micro.Platform
-import           RandomUtil
-import           System.Random           (Random (..), RandomGen, StdGen,
-                                          randomR)
+import           Data.Functor.Identity (Identity (Identity))
+import           Lens.Micro.Platform   (makeLenses, view)
+import           RandomUtil            (RandomGenWrapper)
+import           System.Random         (Random (..), randomR)
 
 data Color
   = Red
