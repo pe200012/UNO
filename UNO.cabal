@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: b6af71640f21ea41db6bf553a979139d4157f66ef2980d4dfdd05d91ce5bdd8d
+-- hash: 448754d4621fe055dc83225e9349712ce4194dddfad0a78d57e2cae97284f8b6
 
 name:           UNO
 version:        0.1.0.0
@@ -29,16 +29,16 @@ library
   exposed-modules:
       Game
       GameType
-      RandomUtil
       Shuffle
   other-modules:
       Paths_UNO
   hs-source-dirs:
       src
   build-depends:
-      array
+      MonadRandom
+    , QuickCheck >=2.14.1
+    , array
     , base >=4.7 && <5
-    , extensible-effects
     , microlens-platform
     , monad-loops
     , mtl
@@ -51,12 +51,13 @@ executable UNO-exe
       Paths_UNO
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -O3
   build-depends:
-      UNO
+      MonadRandom
+    , QuickCheck >=2.14.1
+    , UNO
     , array
     , base >=4.7 && <5
-    , extensible-effects
     , microlens-platform
     , monad-loops
     , mtl
@@ -70,12 +71,13 @@ test-suite UNO-test
       Paths_UNO
   hs-source-dirs:
       test
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
-      UNO
+      MonadRandom
+    , QuickCheck >=2.14.1
+    , UNO
     , array
     , base >=4.7 && <5
-    , extensible-effects
     , microlens-platform
     , monad-loops
     , mtl

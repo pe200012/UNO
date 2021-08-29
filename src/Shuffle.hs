@@ -5,27 +5,34 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Shuffle
   ( shuffle
   , shuffleM
-  , shuffleE
-  )
-where
+  ) where
 
-import qualified Control.Eff            as Eff
-import qualified Control.Eff.State.Lazy as Eff.State
+import           Control.Monad.Random           ( MonadRandom
+                                                , getRandom
+                                                , getRandomR
+                                                , mkStdGen
+                                                )
 import           Control.Monad.ST
 import           Control.Monad.State
-import           Data.Array             (Array)
-import           Data.Array.Base        (MArray (unsafeWrite))
+import           Data.Array                     ( Array )
+import           Data.Array.Base                ( MArray(unsafeWrite) )
 import           Data.Array.MArray
 import           Data.Array.ST
-import           Data.Foldable          (for_)
-import           Data.List              (mapAccumL)
-import           Data.STRef             (newSTRef, readSTRef, writeSTRef)
-import           RandomUtil
-import           System.Random          (RandomGen, StdGen, randomR)
+import           Data.Foldable                  ( for_ )
+import           Data.List                      ( mapAccumL )
+import           Data.STRef                     ( newSTRef
+                                                , readSTRef
+                                                , writeSTRef
+                                                )
+import           System.Random                  ( RandomGen
+                                                , StdGen
+                                                , randomR
+                                                )
 
 shuffle :: RandomGen g => g -> [a] -> ([a], g)
 shuffle g xs = runST $ do
@@ -45,16 +52,7 @@ shuffle g xs = runST $ do
   xs' <- getElems as
   return (xs', g')
 
-shuffleM :: (MonadState g m, RandomGen g) => [a] -> m [a]
+shuffleM :: MonadRandom m => [a] -> m [a]
 shuffleM xs = do
-  g <- get
-  let (xs', g') = shuffle g xs
-  put g'
-  return xs'
-
-shuffleE :: (Eff.Member (Eff.State.State RandomGenWrapper) r) => [a] -> Eff.Eff r [a]
-shuffleE xs = do
-  (RandomGenWrapper g) :: RandomGenWrapper <- Eff.State.get
-  let (xs', g') = shuffle g xs
-  Eff.State.put (RandomGenWrapper g')
-  return xs'
+  gen <- mkStdGen <$> getRandom
+  return $ fst (shuffle gen xs)

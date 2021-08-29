@@ -25,8 +25,8 @@ dependencies:
 - array
 - microlens-platform
 - monad-loops
+- MonadRandom
 - mtl
-- extensible-effects
 - QuickCheck >= 2.14.1
 
 library:

@@ -20,10 +20,13 @@
 
 module GameType where
 
-import           Data.Functor.Identity (Identity (Identity))
-import           Lens.Micro.Platform   (makeLenses, view)
-import           RandomUtil            (RandomGenWrapper)
-import           System.Random         (Random (..), randomR)
+import           Data.Functor.Identity          ( Identity(Identity) )
+import           Lens.Micro.Platform            ( makeLenses
+                                                , view
+                                                )
+import           System.Random                  ( Random(..)
+                                                , randomR
+                                                )
 
 data Color
   = Red
@@ -35,9 +38,9 @@ data Color
 instance Random Color where
   random = randomR (Red, Yellow)
   randomR (lo, hi) g = (colors !! index, g')
-    where
-      (index, g') = randomR (0, length colors - 1) g
-      colors = [lo .. hi]
+   where
+    (index, g') = randomR (0, length colors - 1) g
+    colors      = [lo .. hi]
 
 data SpellCard
   = Draw2
@@ -50,9 +53,9 @@ data SpellCard
 instance Random SpellCard where
   random = randomR (Draw2, Universal)
   randomR (lo, hi) g = (spells !! index, g')
-    where
-      (index, g') = randomR (0, length spells - 1) g
-      spells = [lo..hi]
+   where
+    (index, g') = randomR (0, length spells - 1) g
+    spells      = [lo .. hi]
 
 data NumberCard
   = Zero
@@ -70,9 +73,9 @@ data NumberCard
 instance Random NumberCard where
   random = randomR (Zero, Nine)
   randomR (lo, hi) g = (numbers !! index, g')
-    where
-      (index, g') = randomR (0, length numbers - 1) g
-      numbers = [lo..hi]
+   where
+    (index, g') = randomR (0, length numbers - 1) g
+    numbers     = [lo .. hi]
 
 data Kind
   = Number NumberCard
@@ -86,9 +89,10 @@ data Order
 
 type PlayerIndex = Int -- count from zero
 
-data Card m = Card { _color :: m Color
-                   , _kind  :: Kind
-                   }
+data Card m = Card
+  { _color :: m Color
+  , _kind  :: Kind
+  }
 
 makeLenses ''Card
 
@@ -116,18 +120,20 @@ makeLenses ''CardPlayed
 
 type CardOnHand = CardNew
 
-data Player = Player { _candidates :: [CardOnHand]
-                     , _index      :: PlayerIndex
-                     }
-      deriving (Show, Eq)
+data Player = Player
+  { _candidates :: [CardOnHand]
+  , _index      :: PlayerIndex
+  }
+  deriving (Show, Eq)
 
 makeLenses ''Player
 
-data Turn = Turn { _playedCard    :: CardPlayed
-                 , _playingPlayer :: PlayerIndex
-                 , _order         :: Order
-                 }
-      deriving (Show)
+data Turn = Turn
+  { _playedCard    :: CardPlayed
+  , _playingPlayer :: PlayerIndex
+  , _order         :: Order
+  }
+  deriving Show
 
 makeLenses ''Turn
 
@@ -135,31 +141,33 @@ data TurnReport = PlayerPlayCard PlayerIndex CardPlayed
                 | PlayerPass PlayerIndex
                 | PlayerDrawCards PlayerIndex Int
                 | PlayerDrawAndPlay PlayerIndex Int CardPlayed
-                | PlayerSkiped PlayerIndex
+                | PlayerSkipped PlayerIndex
                 | EmptyPile
       deriving (Show, Eq)
 
 type Pile = [CardNew]
 
-data Game = Game { _pile        :: Pile
-                 , _playedTurn  :: [Turn]
-                 , _players     :: [Player]
-                 , _playerIndex :: PlayerIndex
-                 }
-      deriving (Show)
+data Game = Game
+  { _pile        :: Pile
+  , _playedTurn  :: [Turn]
+  , _players     :: [Player]
+  , _playerIndex :: PlayerIndex
+  }
+  deriving Show
 
 makeLenses ''Game
 
 type Score = Int
 
-data GameResult = GameResult { winner    :: (PlayerIndex, Score)
-                             , finalGame :: Game
-                             }
-      deriving (Show)
+data GameResult = GameResult
+  { winner    :: (PlayerIndex, Score)
+  , finalGame :: Game
+  }
+  deriving Show
 
-data GameDependency = GameDependency { _game :: Game
-                                     , _rgen :: RandomGenWrapper
-                                     }
+data GameDependency = GameDependency
+  { _game :: Game
+  }
 
 makeLenses ''GameDependency
 
@@ -175,12 +183,10 @@ pattern DrawCards c s <-
            Card{_color = Identity c, _kind = Spell s})
 
 pattern SkipCard :: Turn
-pattern SkipCard <-
-        (view (playedCard . runCardPlayed) -> Card{_kind = Spell Skip})
+pattern SkipCard <- (view (playedCard . runCardPlayed) -> Card{_kind = Spell Skip})
 
 pattern ReverseCard :: Turn
-pattern ReverseCard <-
-        (view (playedCard . runCardPlayed) -> Card{_kind = Spell Reverse})
+pattern ReverseCard <- (view (playedCard . runCardPlayed) -> Card{_kind = Spell Reverse})
 
 pattern NormalCard :: Color -> Kind -> Turn
 pattern NormalCard c k <-

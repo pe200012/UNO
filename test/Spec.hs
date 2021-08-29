@@ -20,8 +20,8 @@ import           Lens.Micro.Platform
 import           System.Random           (randomIO, randomRIO)
 import           Test.QuickCheck         (Arbitrary (..), Property,
                                           arbitrarySizedNatural, chooseAny,
-                                          chooseInt, elements, label, listOf, quickCheck, suchThat,
-                                          vectorOf)
+                                          chooseInt, elements, label, listOf,
+                                          quickCheck, suchThat, vectorOf)
 import           Test.QuickCheck.Monadic (monadicIO)
 
 instance Arbitrary Kind where
@@ -92,6 +92,29 @@ instance Arbitrary AnyPlayer where
     AnyPlayer <$>
     (Player <$> listOf (CardNew <$> arbitrary) <*>
      suchThat arbitrarySizedNatural (> 1))
+
+newtype AllSpellPlayer =
+  AllSpellPlayer Player
+  deriving (Show)
+
+instance Arbitrary AllSpellPlayer where
+  arbitrary = allSpellPlayer <$> arbitrary <*> chooseAny <*> chooseAny <*> chooseAny <*> chooseAny
+
+allSpellPlayer :: Int -> Color -> Color -> Color -> Color -> AllSpellPlayer
+allSpellPlayer id c1 c2 c3 c4 = AllSpellPlayer $ Player
+  [ CardNew (Card (Just c1) (Spell Skip))
+  , CardNew (Card (Just c2) (Spell Draw2))
+  , CardNew (Card (Just c3) (Spell Draw4))
+  , CardNew (Card (Just c4) (Spell Reverse))] id
+
+newtype TestingGameDependency =
+  TestingGameDependency GameDependency
+
+instance Show TestingGameDependency where
+  show (TestingGameDependency (GameDependency ga _)) = "TestingGameDependency {GameDependency {_game = " ++ show ga ++", _rgen = <Opaque>}}"
+
+instance Arbitrary TestingGameDependency where
+
 
 prop_drawsCorrectlyDrawNCardsIntoPlayerCandidates ::
      SufficientPile -> Player -> Property
